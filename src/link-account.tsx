@@ -1,39 +1,38 @@
 import { Action, ActionPanel, Form, showToast, Toast, useNavigation } from "@raycast/api";
 import { useState } from "react";
-import { Client } from "discord.js-selfbot-v13";
 import { setCachedData, CacheKey } from "./utils/cache";
+import { validateToken, destroyClient, getClientMemoryInfo } from "./utils/client";
 
 export default function Command() {
     const [token, setToken] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const { pop } = useNavigation();
+
     async function handleSubmit(values: { token: string }) {
         setIsLoading(true);
         const toast = await showToast({ style: Toast.Style.Animated, title: "Validating Token..." });
 
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const options: any = { checkUpdate: false };
-            const client = new Client(options);
-            await client.login(values.token);
+            // Log current memory state
+            const memoryInfo = getClientMemoryInfo();
+            console.log("Memory info before validation:", memoryInfo);
+
+            // Validate token using dedicated function (properly cleans up)
+            const result = await validateToken(values.token);
+
+            if (!result.valid || !result.user) {
+                throw new Error(result.error || "Invalid token");
+            }
 
             // Token is valid, save it
             await setCachedData(CacheKey.Token, values.token);
 
             // Cache basic user info immediately
-            const userInfo = {
-                id: client.user?.id,
-                username: client.user?.username,
-                discriminator: client.user?.discriminator,
-                avatar: client.user?.avatarURL(),
-            };
-            await setCachedData(CacheKey.UserInfo, userInfo);
-
-            client.destroy();
+            await setCachedData(CacheKey.UserInfo, result.user);
 
             toast.style = Toast.Style.Success;
             toast.title = "Account Linked!";
-            toast.message = `Logged in as ${userInfo.username}`;
+            toast.message = `Logged in as ${result.user.username}`;
 
             setTimeout(() => pop(), 1000);
         } catch (error) {
