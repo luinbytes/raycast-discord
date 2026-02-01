@@ -1,39 +1,61 @@
 import { Action, ActionPanel, Form, showToast, Toast, useNavigation } from "@raycast/api";
 import { useState } from "react";
-import { Client } from "discord.js-selfbot-v13";
 import { setCachedData, CacheKey } from "./utils/cache";
+
+// Discord API user response type
+interface DiscordUser {
+    id: string;
+    username: string;
+    discriminator: string;
+    avatar: string | null;
+    global_name: string | null;
+}
+
+// Use Discord's REST API directly to validate token and get user info
+// This is much lighter than the full WebSocket client and avoids OOM issues
+async function validateTokenAndGetUserInfo(token: string) {
+    const response = await fetch("https://discord.com/api/v10/users/@me", {
+        headers: {
+            Authorization: token,
+            "Content-Type": "application/json",
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Token validation failed: ${response.statusText}`);
+    }
+
+    const userData = (await response.json()) as DiscordUser;
+    return {
+        id: userData.id,
+        username: userData.username,
+        discriminator: userData.discriminator,
+        avatar: userData.avatar ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png` : null,
+    };
+}
 
 export default function Command() {
     const [token, setToken] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const { pop } = useNavigation();
+
     async function handleSubmit(values: { token: string }) {
         setIsLoading(true);
         const toast = await showToast({ style: Toast.Style.Animated, title: "Validating Token..." });
 
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const options: any = { checkUpdate: false };
-            const client = new Client(options);
-            await client.login(values.token);
+            // Validate token and get user info using REST API (lightweight)
+            const userInfo = await validateTokenAndGetUserInfo(values.token);
 
             // Token is valid, save it
             await setCachedData(CacheKey.Token, values.token);
 
-            // Cache basic user info immediately
-            const userInfo = {
-                id: client.user?.id,
-                username: client.user?.username,
-                discriminator: client.user?.discriminator,
-                avatar: client.user?.avatarURL(),
-            };
+            // Cache user info
             await setCachedData(CacheKey.UserInfo, userInfo);
-
-            client.destroy();
 
             toast.style = Toast.Style.Success;
             toast.title = "Account Linked!";
-            toast.message = `Logged in as ${userInfo.username}`;
+            toast.message = `Logged in as ${userInfo.username}${userInfo.discriminator !== '0' ? `#${userInfo.discriminator}` : ''}`;
 
             setTimeout(() => pop(), 1000);
         } catch (error) {
